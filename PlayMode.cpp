@@ -13,23 +13,23 @@
 
 #include <random>
 
-GLuint phonebank_meshes_for_lit_color_texture_program = 0;
-Load< MeshBuffer > phonebank_meshes(LoadTagDefault, []() -> MeshBuffer const * {
-	MeshBuffer const *ret = new MeshBuffer(data_path("phone-bank.pnct"));
-	phonebank_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
+GLuint track_meshes_for_lit_color_texture_program = 0;
+Load< MeshBuffer > track_meshes(LoadTagDefault, []() -> MeshBuffer const * {
+	MeshBuffer const *ret = new MeshBuffer(data_path("track.pnct"));
+	track_meshes_for_lit_color_texture_program = ret->make_vao_for_program(lit_color_texture_program->program);
 	return ret;
 });
 
-Load< Scene > phonebank_scene(LoadTagDefault, []() -> Scene const * {
-	return new Scene(data_path("phone-bank.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
-		Mesh const &mesh = phonebank_meshes->lookup(mesh_name);
+Load< Scene > track_scene(LoadTagDefault, []() -> Scene const * {
+	return new Scene(data_path("track.scene"), [&](Scene &scene, Scene::Transform *transform, std::string const &mesh_name){
+		Mesh const &mesh = track_meshes->lookup(mesh_name);
 
 		scene.drawables.emplace_back(transform);
 		Scene::Drawable &drawable = scene.drawables.back();
 
 		drawable.pipeline = lit_color_texture_program_pipeline;
 
-		drawable.pipeline.vao = phonebank_meshes_for_lit_color_texture_program;
+		drawable.pipeline.vao = track_meshes_for_lit_color_texture_program;
 		drawable.pipeline.type = mesh.type;
 		drawable.pipeline.start = mesh.start;
 		drawable.pipeline.count = mesh.count;
@@ -38,16 +38,53 @@ Load< Scene > phonebank_scene(LoadTagDefault, []() -> Scene const * {
 });
 
 WalkMesh const *walkmesh = nullptr;
-Load< WalkMeshes > phonebank_walkmeshes(LoadTagDefault, []() -> WalkMeshes const * {
-	WalkMeshes *ret = new WalkMeshes(data_path("phone-bank.w"));
+Load< WalkMeshes > track_walkmeshes(LoadTagDefault, []() -> WalkMeshes const * {
+	WalkMeshes *ret = new WalkMeshes(data_path("track.w"));
 	walkmesh = &ret->lookup("WalkMesh");
 	return ret;
 });
 
-PlayMode::PlayMode() : scene(*phonebank_scene) {
+PlayMode::PlayMode() : scene(*track_scene) {
 	//create a player transform:
-	scene.transforms.emplace_back();
-	player.transform = &scene.transforms.back();
+	//scene.transforms.emplace_back();
+	//player.transform = &scene.transforms.back(); <-- player transform set in track_scene
+
+
+	//get pointers to leg for convenience:
+	for (auto &transform : scene.transforms) {
+		if (transform.name == "Waist") player.transform = &transform;
+		else if(transform.name == "L_UpperArm") lUpperArm = &transform;
+		else if(transform.name == "R_UpperArm") rUpperArm = &transform;
+		else if(transform.name == "L_LowerArm") lLowerArm = &transform;
+		else if(transform.name == "R_LowerArm") rLowerArm = &transform;
+		else if(transform.name == "L_ThighArm") lThigh = &transform;
+		else if(transform.name == "L_ThighArm") rThigh = &transform;
+		else if(transform.name == "L_CalfArm") lCalf = &transform;
+		else if(transform.name == "L_CalfArm") rCalf = &transform;
+	}
+
+	if (player.transform == nullptr) throw std::runtime_error("Player not found.");
+	if (lUpperArm == nullptr) throw std::runtime_error("Left Upper Arm not found.");
+	if (rUpperArm == nullptr) throw std::runtime_error("Right Upper Arm not found.");
+	if (lLowerArm == nullptr) throw std::runtime_error("Left Lower Arm not found.");
+	if (rLowerArm == nullptr) throw std::runtime_error("Right Lower Arm not found.");
+	if (lThighArm == nullptr) throw std::runtime_error("Left Thigh not found.");
+	if (rThighArm == nullptr) throw std::runtime_error("Right Thigh not found.");
+	if (lCalfArm == nullptr) throw std::runtime_error("Left Calf not found.");
+	if (rCalfArm == nullptr) throw std::runtime_error("Right Calf not found.");
+
+	hip_base_rotation = hip->rotation;
+	upper_leg_base_rotation = upper_leg->rotation;
+	lower_leg_base_rotation = lower_leg->rotation;
+
+	//get pointer to camera for convenience:
+	if (scene.cameras.size() != 1) throw std::runtime_error("Expecting scene to have exactly one camera, but it has " + std::to_string(scene.cameras.size()));
+	camera = &scene.cameras.front();
+
+
+
+	//set start position
+	player.transform->position = vec3(0.0f, 0.0f, 0.0f);
 
 	//create a player camera attached to a child of the player transform:
 	scene.transforms.emplace_back();
@@ -55,17 +92,17 @@ PlayMode::PlayMode() : scene(*phonebank_scene) {
 	player.camera = &scene.cameras.back();
 	player.camera->fovy = glm::radians(60.0f);
 	player.camera->near = 0.01f;
+
 	player.camera->transform->parent = player.transform;
 
-	//player's eyes are 1.8 units above the ground:
-	player.camera->transform->position = glm::vec3(0.0f, 0.0f, 1.8f);
+	//offset position to behind player
+	player.camera->transform->position = glm::vec3(0.0f, -5.0f, 5.0f);
 
 	//rotate camera facing direction (-z) to player facing direction (+y):
 	player.camera->transform->rotation = glm::angleAxis(glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 
 	//start player walking at nearest walk point:
 	player.at = walkmesh->nearest_walk_point(player.transform->position);
-
 }
 
 PlayMode::~PlayMode() {
@@ -139,19 +176,45 @@ bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size)
 void PlayMode::update(float elapsed) {
 	//player walking:
 	{
+		total_time_elapsed += elapsed;
+
+		if(won_game || player.transform->position.y >= 10.0f) { //reached end
+			won_game = true;
+			return;
+		}
+
 		//combine inputs into a move:
-		constexpr float PlayerSpeed = 3.0f;
+		constexpr float PlayerVel = 1.0f;
 		glm::vec2 move = glm::vec2(0.0f);
-		if (left.pressed && !right.pressed) move.x =-1.0f;
-		if (!left.pressed && right.pressed) move.x = 1.0f;
-		if (down.pressed && !up.pressed) move.y =-1.0f;
-		if (!down.pressed && up.pressed) move.y = 1.0f;
+		//if (left.pressed && !right.pressed) move.x =-1.0f;
+		//if (!left.pressed && right.pressed) move.x = 1.0f;
+		if (down.pressed && !up.pressed) player.speed -= 1.0f;
+		if (!down.pressed && up.pressed) player.speed += 1.0f;
 
-		//make it so that moving diagonally doesn't go faster:
-		if (move != glm::vec2(0.0f)) move = glm::normalize(move) * PlayerSpeed * elapsed;
+		if(!down.pressed && !up.pressed) {
+			player.speed -= 1.0f;
+			player.speed = std::clamp(player.speed, 0.0f, 10.0f);
+		} else {
+			player.speed = std::clamp(player.speed. -10.0f, 10.0f);
+		}
 
-		//get move in world coordinate system:
-		glm::vec3 remain = player.transform->make_local_to_world() * glm::vec4(move.x, move.y, 0.0f, 0.0f);
+
+		//procedural running animation by speed
+		float speed = std::abs(player.speed);
+		glm::quat limbBend = lLowerArmRotaion = glm::angleAxis(speed*-(3.141592f/2.0f), glm::vec3(1.0f, 0.0f, 0.0f));;
+		lLowerArmRotaion = limbBend;
+		rLowerArmRotaion = limbBend;
+		lCalfRotaion = limbBend;
+		rCalfRotaion = limbBend;
+		lUpperArmRotaion = glm::angleAxis(speed*glm::radians(60.0f)*sin(total_time_elapsed*6.28318530718f), glm::vec3(1.0f, 0.0f, 0.0f));
+		rUpperArmRotaion = glm::angleAxis(speed*glm::radians(60.0f)*sin(total_time_elapsed*6.28318530718f + 3.141592f), glm::vec3(1.0f, 0.0f, 0.0f));
+		lThighArmRotaion = glm::angleAxis(speed*glm::radians(60.0f)*sin(total_time_elapsed*6.28318530718f + 3.141592f), glm::vec3(1.0f, 0.0f, 0.0f));
+		rThighArmRotaion = glm::angleAxis(speed*glm::radians(60.0f)*sin(total_time_elapsed*6.28318530718f), glm::vec3(1.0f, 0.0f, 0.0f));
+		
+
+		glm::vec3 remain = player.transform->make_local_to_world() * glm::vec4(0.0f, player.speed, 0.0f, 0.0f);
+
+		//get move in world cordinate system:
 
 		//using a for() instead of a while() here so that if walkpoint gets stuck in
 		// some awkward case, code will not infinite loop:
@@ -212,6 +275,7 @@ void PlayMode::update(float elapsed) {
 			player.transform->rotation = glm::normalize(adjust * player.transform->rotation);
 		}
 
+
 		/*
 		glm::mat4x3 frame = camera->transform->make_local_to_parent();
 		glm::vec3 right = frame[0];
@@ -230,6 +294,14 @@ void PlayMode::update(float elapsed) {
 }
 
 void PlayMode::draw(glm::uvec2 const &drawable_size) {
+
+	//waist bobbing animation. purely visual so hopefully doesn't affect gameplay behavior
+	float speed = std::abs(player.speed);
+	float offset = ()*std::sin(6.28318530718f*time_elapsed);
+	player.transform.z -= ((1.92234f - 1.83241f)*speed)*std::sin(6.28318530718f*time_elapsed);
+
+
+
 	//update camera aspect ratio for drawable:
 	player.camera->aspect = float(drawable_size.x) / float(drawable_size.y);
 
@@ -272,16 +344,27 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 			0.0f, 0.0f, 0.0f, 1.0f
 		));
 
+
+
 		constexpr float H = 0.09f;
-		lines.draw_text("Mouse motion looks; WASD moves; escape ungrabs mouse",
-			glm::vec3(-aspect + 0.1f * H, -1.0 + 0.1f * H, 0.0),
-			glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
-			glm::u8vec4(0x00, 0x00, 0x00, 0x00));
-		float ofs = 2.0f / drawable_size.y;
-		lines.draw_text("Mouse motion looks; WASD moves; escape ungrabs mouse",
-			glm::vec3(-aspect + 0.1f * H + ofs, -1.0 + + 0.1f * H + ofs, 0.0),
-			glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
-			glm::u8vec4(0xff, 0xff, 0xff, 0x00));
+		if(won_game) {
+			lines.draw_text("You won with a time of " + std::to_string(time_elapsed),
+				glm::vec3(-aspect + 0.1f * H, -1.0 + 0.1f * H, 0.0),
+				glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
+				glm::u8vec4(0x00, 0x00, 0x00, 0x00));
+
+		} else {
+			lines.draw_text("Mouse motion looks; WASD moves; escape ungrabs mouse",
+				glm::vec3(-aspect + 0.1f * H, -1.0 + 0.1f * H, 0.0),
+				glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
+				glm::u8vec4(0x00, 0x00, 0x00, 0x00));
+			float ofs = 2.0f / drawable_size.y;
+			lines.draw_text("Mouse motion looks; WASD moves; escape ungrabs mouse",
+				glm::vec3(-aspect + 0.1f * H + ofs, -1.0 + + 0.1f * H + ofs, 0.0),
+				glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
+				glm::u8vec4(0xff, 0xff, 0xff, 0x00));
+		}
 	}
+	player.transform.z += offset;
 	GL_ERRORS();
 }

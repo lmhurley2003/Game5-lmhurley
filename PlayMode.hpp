@@ -31,9 +31,33 @@ struct PlayMode : Mode {
 	//player info:
 	struct Player {
 		WalkPoint at;
-		//transform is at player's feet and will be yawed by mouse left/right motion:
+		//transform is at player's feet and will be yawed by a& d:
 		Scene::Transform *transform = nullptr;
-		//camera is at player's head and will be pitched by mouse up/down motion:
+		//camera is offset behind player's head and oved by mouse up/down motion:
 		Scene::Camera *camera = nullptr;
+
+		float speed = 0.0f;
 	} player;
+
+	Scene::Transform* lUpperArm = nullptr;
+	Scene::Transform* rUpperArm = nullptr;
+	Scene::Transform* lLowerArm = nullptr;
+	Scene::Transform* rLowerArm = nullptr;
+	Scene::Transform* lThigh = nullptr;
+	Scene::Transform* rThigh = nullptr;
+	Scene::Transform* lCalf = nullptr;
+	Scene::Transform* rCalf = nullptr;
+	glm::quat lUpperArmRotation;
+	glm::quat rUpperArmRotation;
+	glm::quat lLowerArmRotation;
+	glm::quat rLowerArmRotation;
+	glm::quat lThighRotation;
+	glm::quat rThighRotation;
+	glm::quat lCalfRotation;
+	glm::quat rCalfRotation;
+
+
+	double total_time_elapsed = 0.0f;
+	bool won_game = false;
+
 };
