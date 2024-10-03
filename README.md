@@ -1,8 +1,8 @@
-# (TODO: your game's title)
+Spinny Racer
 
-Author: (TODO: your name)
+Author: Lucas Hurley
 
-Design: (TODO: In two sentences or fewer, describe what is new and interesting about your game.)
+Design: In this game, you run in a sonic-esq stage, going through loops and flipping upside down. The goal is to complete the course in the shortest amount of time!
 
 Screen Shot:
 
@@ -10,9 +10,8 @@ Screen Shot:
 
 How To Play:
 
-(TODO: describe the controls and (if needed) goals/strategy.)
+Go fowards/backwards with w/s. Steer with the mouse. 
 
-Sources: (TODO: list a source URL for any assets you did not create yourself. Make sure you have a license for the asset.)
 
 This game was built with [NEST](NEST.md).
 
